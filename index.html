@@ -507,7 +507,7 @@
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.11.0/firebase-app.js";
 import { getAuth, signInAnonymously, onAuthStateChanged, setPersistence, browserSessionPersistence, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/12.11.0/firebase-auth.js";
-import { getFirestore, collection, addDoc, getDocs, doc, deleteDoc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/12.11.0/firebase-firestore.js";
+import { getFirestore, collection, addDoc, getDocs, doc, deleteDoc, setDoc, getDoc, writeBatch } from "https://www.gstatic.com/firebasejs/12.11.0/firebase-firestore.js";
 
 const firebaseConfig = {
     apiKey: "AIzaSyDg4Q6rsrvPhY31oCpL4DAAjTKlgjJN1c0",
@@ -1421,14 +1421,37 @@ async function executePendingAdminAction() {
     }
     else if (pendingAuthAction === 'import_students' && importedStudentsCache.length > 0) {
         showCustomAlert("Đang tiến hành nhập dữ liệu, vui lòng đợi...");
+        let completed = 0;
+        const total = importedStudentsCache.length;
+        const BATCH_SIZE = 400;
+        const studentsRef = collection(db, 'artifacts', appId_fixed, 'public', 'data', collectionStudents);
         try {
-            for(let i=0; i<importedStudentsCache.length; i++) {
-                await addDoc(collection(db, 'artifacts', appId_fixed, 'public', 'data', collectionStudents), { ...importedStudentsCache[i], projectId });
+            for (let start = 0; start < total; start += BATCH_SIZE) {
+                const batch = writeBatch(db);
+                const chunk = importedStudentsCache.slice(start, start + BATCH_SIZE);
+
+                chunk.forEach(student => {
+                    // Giữ ID ổn định trong cache để có thể retry mà không tạo bản ghi trùng.
+                    if (!student._importDocId) student._importDocId = doc(studentsRef).id;
+                    const { _importDocId, ...studentData } = student;
+                    batch.set(doc(studentsRef, _importDocId), { ...studentData, projectId });
+                });
+
+                await batch.commit();
+                completed += chunk.length;
+
+                const progressBox = document.getElementById('custom-alert');
+                progressBox.textContent = `Đang import học sinh: ${completed}/${total}`;
+                progressBox.style.display = 'block';
             }
-            showCustomAlert(`✅ Đã import thành công ${importedStudentsCache.length} học sinh!`);
+
+            showCustomAlert(`✅ Đã import thành công ${completed} học sinh!`);
             importedStudentsCache = [];
             renderAdminStudents();
-        } catch(e) { showCustomAlert("Lỗi khi tải dữ liệu lên Server!"); }
+        } catch(e) {
+            console.error("Lỗi import học sinh:", e);
+            showCustomAlert(`⚠️ Import lỗi sau ${completed}/${total} học sinh. Dữ liệu đã ghi được giữ lại; hãy thử lại để tiếp tục. Mã lỗi: ${e.code || 'unknown'}`);
+        }
     }
     else if (pendingAuthAction === 'toggle_autoscale') {
         const newState = !isAutoScaleEnabled;
