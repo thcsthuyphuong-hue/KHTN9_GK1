@@ -522,10 +522,16 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const appId_fixed = 'kham-pha-khtn-9'; 
-const collectionName = 'quiz_results_khtn9'; 
-const collectionReports = 'error_reports_khtn9';
-const collectionStudents = 'students_list_khtn9';
+const projectId = 'KHTN9_GK1';
+const appId_fixed = 'khtn-unified';
+const collectionName = 'quiz_results';
+const collectionReports = 'error_reports';
+const collectionStudents = 'students';
+// Legacy namespace retained for a separate, non-destructive data migration.
+const legacyAppId = 'kham-pha-khtn-9';
+const legacyCollectionName = 'quiz_results_khtn9';
+const legacyCollectionReports = 'error_reports_khtn9';
+const legacyCollectionStudents = 'students_list_khtn9';
 
 let currentUser = null, quizStartTime = 0, isQuizRunning = false, mode = '', currentIdx = 0, userAnswers = {}, timeLeft = 0, timerInt, currentExam = [];
 let arExamData = [], arUserAnswers = {}; 
@@ -916,7 +922,7 @@ async function loadStudentList() {
     try {
         const snap = await getDocs(collection(db, 'artifacts', appId_fixed, 'public', 'data', collectionStudents));
         globalStudentList = [];
-        snap.forEach(d => globalStudentList.push({id: d.id, ...d.data()}));
+        snap.forEach(d => { const data = d.data(); if (data.projectId === projectId) globalStudentList.push({id: d.id, ...data}); });
         if(!document.getElementById('guest-mode-toggle').checked) {
             autocomplete(document.getElementById("username"), globalStudentList);
         }
@@ -986,7 +992,7 @@ function checkShortAns(u, a) {
 
 async function loadTimeConfig() {
     try {
-        const docRef = await getDoc(doc(db, 'artifacts', appId_fixed, 'public', 'data', 'config', 'timer_settings'));
+        const docRef = await getDoc(doc(db, 'artifacts', appId_fixed, 'public', 'data', 'config', `timer_settings_${projectId}`));
         if(docRef.exists()) {
             const data = docRef.data();
             practiceTimeLimit = (data.practice || 45) * 60; testTimeLimit = (data.test || 45) * 60; maxHintsAllowed = data.maxHints !== undefined ? data.maxHints : 3;
@@ -1151,7 +1157,7 @@ async function calculateResult() {
     if(currentUser) {
         try { 
             await addDoc(collection(db, 'artifacts', appId_fixed, 'public', 'data', collectionName), { 
-                name: u.name, school: u.sch, sbd: u.sbd, class: u.cls, topic: u.topic, score: fs, duration: dur, mode: mode, timestamp: new Date().toISOString(), examData: currentExam, userAnswers: userAnswers 
+                projectId, name: u.name, school: u.sch, sbd: u.sbd, class: u.cls, topic: u.topic, score: fs, duration: dur, mode: mode, timestamp: new Date().toISOString(), examData: currentExam, userAnswers: userAnswers 
             }); 
         } catch(e) { hasSaved = false; }
     }
@@ -1161,7 +1167,7 @@ async function calculateResult() {
 async function fetchRankAndLeaderboard(myScore, myTopic) {
     try {
         const snap = await getDocs(collection(db, 'artifacts', appId_fixed, 'public', 'data', collectionName));
-        let list = []; snap.forEach(d => list.push(d.data()));
+        let list = []; snap.forEach(d => { const data = d.data(); if (data.projectId === projectId) list.push(data); });
         list = list.filter(r => (r.mode === 'test' || !r.mode) && r.topic === myTopic); 
         list.sort((a,b) => b.score - a.score || a.duration - b.duration);
         const myRank = list.findIndex(r => r.name === window.finalUserData.name && r.score === myScore) + 1;
@@ -1174,7 +1180,7 @@ async function renderAdmin() {
     listBody.innerHTML = "<tr><td colspan='11'>Đang tải dữ liệu...</td></tr>";
     try {
         const snap = await getDocs(collection(db, 'artifacts', appId_fixed, 'public', 'data', collectionName));
-        let rawData = []; snap.forEach(d => rawData.push({id: d.id, ...d.data()}));
+        let rawData = []; snap.forEach(d => { const data = d.data(); if (data.projectId === projectId) rawData.push({id: d.id, ...data}); });
         const classes = [...new Set(rawData.map(i => i.class))].sort(); 
         const schools = [...new Set(rawData.map(i => i.school))].filter(s => s).sort();
         const fClass = document.getElementById('admin-filter-class'); const oldC = fClass.value; fClass.innerHTML = '<option value="all">Tất cả lớp</option>' + classes.map(c => `<option value="${c}" ${c===oldC?'selected':''}>Lớp ${c}</option>`).join('');
@@ -1406,7 +1412,7 @@ async function executePendingAdminAction() {
             const snap = await getDocs(collection(db, 'artifacts', appId_fixed, 'public', 'data', collectionStudents));
             const deletePromises = [];
             snap.forEach(docSnap => {
-                deletePromises.push(deleteDoc(doc(db, 'artifacts', appId_fixed, 'public', 'data', collectionStudents, docSnap.id)));
+                if (docSnap.data().projectId === projectId) deletePromises.push(deleteDoc(doc(db, 'artifacts', appId_fixed, 'public', 'data', collectionStudents, docSnap.id)));
             });
             await Promise.all(deletePromises);
             showCustomAlert("✅ Đã làm sạch toàn bộ danh sách học sinh!");
@@ -1417,7 +1423,7 @@ async function executePendingAdminAction() {
         showCustomAlert("Đang tiến hành nhập dữ liệu, vui lòng đợi...");
         try {
             for(let i=0; i<importedStudentsCache.length; i++) {
-                await addDoc(collection(db, 'artifacts', appId_fixed, 'public', 'data', collectionStudents), importedStudentsCache[i]);
+                await addDoc(collection(db, 'artifacts', appId_fixed, 'public', 'data', collectionStudents), { ...importedStudentsCache[i], projectId });
             }
             showCustomAlert(`✅ Đã import thành công ${importedStudentsCache.length} học sinh!`);
             importedStudentsCache = [];
@@ -1427,7 +1433,7 @@ async function executePendingAdminAction() {
     else if (pendingAuthAction === 'toggle_autoscale') {
         const newState = !isAutoScaleEnabled;
         try {
-            await setDoc(doc(db, 'artifacts', appId_fixed, 'public', 'data', 'config', 'timer_settings'), { autoScale: newState, lastUpdated: new Date().toISOString() }, { merge: true }); 
+            await setDoc(doc(db, 'artifacts', appId_fixed, 'public', 'data', 'config', `timer_settings_${projectId}`), { autoScale: newState, lastUpdated: new Date().toISOString() }, { merge: true }); 
             isAutoScaleEnabled = newState;
             document.getElementById('autoscale-status').innerText = isAutoScaleEnabled ? '🟢' : '🔴';
             showCustomAlert(`Đã ${isAutoScaleEnabled ? 'BẬT' : 'TẮT'} tính năng thu phóng (PC) thành công!`);
@@ -1437,7 +1443,7 @@ async function executePendingAdminAction() {
     else if (pendingAuthAction === 'config') {
         const pTime = parseInt(document.getElementById('cfg-time-practice').value), tTime = parseInt(document.getElementById('cfg-time-test').value), mHints = parseInt(document.getElementById('cfg-max-hints').value);
         if(isNaN(pTime) || isNaN(tTime) || isNaN(mHints) || pTime <= 0 || tTime <= 0 || mHints < 0) { showCustomAlert("⚠️ Vui lòng nhập số hợp lệ!"); return; }
-        try { await setDoc(doc(db, 'artifacts', appId_fixed, 'public', 'data', 'config', 'timer_settings'), { practice: pTime, test: tTime, maxHints: mHints, autoScale: isAutoScaleEnabled, lastUpdated: new Date().toISOString() }, { merge: true }); practiceTimeLimit = pTime * 60; testTimeLimit = tTime * 60; maxHintsAllowed = mHints; showCustomAlert("Đã cập nhật cấu hình thành công!"); } catch(e) { showCustomAlert("Lỗi khi lưu cấu hình!"); }
+        try { await setDoc(doc(db, 'artifacts', appId_fixed, 'public', 'data', 'config', `timer_settings_${projectId}`), { practice: pTime, test: tTime, maxHints: mHints, autoScale: isAutoScaleEnabled, lastUpdated: new Date().toISOString() }, { merge: true }); practiceTimeLimit = pTime * 60; testTimeLimit = tTime * 60; maxHintsAllowed = mHints; showCustomAlert("Đã cập nhật cấu hình thành công!"); } catch(e) { showCustomAlert("Lỗi khi lưu cấu hình!"); }
     } else if (pendingAuthAction === 'inbox') { renderAdminInbox(); }
     pendingAuthAction = null;
 }
@@ -1540,7 +1546,7 @@ document.getElementById('btn-report-submit').onclick = async () => {
     if (!qPos && !detail) { showCustomAlert("Vui lòng nhập ít nhất vị trí lỗi hoặc mô tả!"); return; }
     const btn = document.getElementById('btn-report-submit'); btn.innerText = "ĐANG GỬI..."; btn.disabled = true;
     try {
-        await addDoc(collection(db, 'artifacts', appId_fixed, 'public', 'data', collectionReports), { name: window.finalUserData?.name || "Học sinh Ẩn danh", question: qPos, detail: detail, image: reportImageBase64, timestamp: new Date().toISOString() });
+        await addDoc(collection(db, 'artifacts', appId_fixed, 'public', 'data', collectionReports), { projectId, name: window.finalUserData?.name || "Học sinh Ẩn danh", question: qPos, detail: detail, image: reportImageBase64, timestamp: new Date().toISOString() });
         document.getElementById('report-modal').style.display = 'none'; showCustomAlert("Cảm ơn bạn đã gửi báo lỗi!");
         document.getElementById('report-question').value = ''; document.getElementById('report-detail').value = ''; document.getElementById('report-file').value = ''; document.getElementById('report-img-preview').style.display = 'none'; reportImageBase64 = "";
     } catch(e) { showCustomAlert("Có lỗi xảy ra, vui lòng thử lại sau!"); }
@@ -1551,7 +1557,7 @@ async function renderAdminInbox() {
     document.getElementById('admin-inbox-modal').style.display = 'flex'; const listBody = document.getElementById('inbox-list-body'); listBody.innerHTML = "<tr><td colspan='6'>Đang tải hộp thư...</td></tr>";
     try {
         const snap = await getDocs(collection(db, 'artifacts', appId_fixed, 'public', 'data', collectionReports));
-        let reports = []; snap.forEach(d => reports.push({id: d.id, ...d.data()})); reports.sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
+        let reports = []; snap.forEach(d => { const data = d.data(); if (data.projectId === projectId) reports.push({id: d.id, ...data}); }); reports.sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
         if (reports.length === 0) { listBody.innerHTML = "<tr><td colspan='6' style='text-align:center;'>Hộp thư trống. Chưa có báo cáo nào!</td></tr>"; return; }
         listBody.innerHTML = reports.map(r => `<tr><td><small>${new Date(r.timestamp).toLocaleString('vi-VN')}</small></td><td><b>${r.name}</b></td><td>${r.question || '-'}</td><td>${r.detail || '-'}</td><td>${r.image ? `<button class="btn btn-gray btn-view-img" data-img="${r.image}" style="padding:4px 8px; font-size:0.75rem;">Xem ảnh 🖼️</button>` : '-'}</td><td><button class="btn-del-report" data-id="${r.id}" style="background:var(--danger); color:white; border:none; padding:6px 10px; border-radius:4px; cursor:pointer; font-size: 0.8rem;">Xóa</button></td></tr>`).join('');
         listBody.querySelectorAll('.btn-del-report').forEach(b => { b.onclick = async () => { if (confirm("Xóa báo cáo lỗi này?")) { b.innerText = "..."; b.disabled = true; await deleteDoc(doc(db, 'artifacts', appId_fixed, 'public', 'data', collectionReports, b.dataset.id)); renderAdminInbox(); } } });
