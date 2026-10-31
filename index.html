@@ -1420,11 +1420,13 @@ async function executePendingAdminAction() {
         } catch(e) { showCustomAlert("Lỗi khi xóa dữ liệu!"); }
     }
     else if (pendingAuthAction === 'import_students' && importedStudentsCache.length > 0) {
-        showCustomAlert("Đang tiến hành nhập dữ liệu, vui lòng đợi...");
         let completed = 0;
         const total = importedStudentsCache.length;
         const BATCH_SIZE = 400;
         const studentsRef = collection(db, 'artifacts', appId_fixed, 'public', 'data', collectionStudents);
+        const progressBox = document.getElementById('custom-alert');
+        progressBox.textContent = `Đang import học sinh: 0/${total}`;
+        progressBox.style.display = 'block';
         try {
             for (let start = 0; start < total; start += BATCH_SIZE) {
                 const batch = writeBatch(db);
@@ -1440,7 +1442,6 @@ async function executePendingAdminAction() {
                 await batch.commit();
                 completed += chunk.length;
 
-                const progressBox = document.getElementById('custom-alert');
                 progressBox.textContent = `Đang import học sinh: ${completed}/${total}`;
                 progressBox.style.display = 'block';
             }
